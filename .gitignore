@@ -1,0 +1,19 @@
+# Environment variables — never commit these
+.env
+
+# Repos you ingest locally (can be huge)
+repos/
+
+# Node modules
+node_modules/
+
+# Vector store persistence (Phase 3)
+.chroma/
+
+# Build artifacts
+dist/
+build/
+
+# OS junk
+.DS_Store
+Thumbs.db

@@ -1,0 +1,16 @@
+{
+  "name": "codebase-qna-assistant",
+  "version": "1.0.0",
+  "description": "RAG-powered codebase Q&A with cited file paths and line numbers",
+  "type": "module",
+  "scripts": {
+    "ask": "node src/ask.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.0.0",
+    "@langchain/core": "^1.1.30",
+    "@langchain/groq": "^1.3.1",
+    "@langchain/textsplitters": "^1.0.2",
+    "dotenv": "^16.0.0"
+  }
+}
