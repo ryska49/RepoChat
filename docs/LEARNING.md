@@ -61,6 +61,45 @@ Each file does one thing: `loader.js` walks files, `splitter.js` chunks them, `e
 ### The Pipeline at a Glance
 
 ```
+
+---
+
+## Phase 2 — Evaluation Set
+
+### Why Measure Retrieval, Not Answer Quality?
+
+Answer quality requires a human to read every response and judge it — that doesn't scale. **Retrieval hit rate** is automatic and objective: for each question, did the file containing the real answer appear in the top-k chunks returned by the vector store?
+
+If the right file **is** retrieved → the LLM almost always answers correctly.
+If the right file **isn't** retrieved → no prompt or model can fix it; it was never in the context.
+
+This makes retrieval hit rate the single most actionable metric at this stage.
+
+### Key Terms
+
+| Term | Definition |
+|---|---|
+| **Hit** | The expected file appears at least once in the top-k retrieved chunks |
+| **Miss** | The expected file does not appear in top-k — the LLM will say "I don't know" |
+| **Hit rate** | hits / total questions × 100% |
+| **Recall curve** | Hit rate measured at different k values (k=5, 10, 20) — shows how much improvement you get by retrieving more chunks |
+| **Baseline** | The score before any improvements — used to prove future changes helped |
+
+### Baseline Scores (Phase 2, pure vector search)
+
+| k | Hit Rate |
+|---|---|
+| 5  | **76%** (13/17) |
+| 10 | **82%** (14/17) |
+| 20 | **88%** (15/17) |
+
+### What the Misses Tell Us
+
+All 4 misses at k=5 share the same pattern: the **route file** (e.g. `authRoutes.js`) is beaten by the **controller file** (e.g. `authController.js`).
+
+Why? The controller is much longer and contains more meaningful words. The embedding model finds it more semantically similar to questions like "what routes are available?". The route file is tiny (11 lines, just `router.post(...)` declarations) and lacks prose that matches the question.
+
+**This is the exact problem hybrid search (Phase 4) fixes.** BM25 keyword search finds `authRoutes.js` by matching the word "auth" in the filename — something semantic vectors can't do.
 Repo folder
     │
     ▼
@@ -84,3 +123,42 @@ retriever.js       Build context block, call Claude, return cited answer
     ▼
 stdout
 ```
+
+---
+
+## Phase 2 — Evaluation Set
+
+### Why Measure Retrieval, Not Answer Quality?
+
+Answer quality requires a human to read every response and judge it — that doesn't scale. **Retrieval hit rate** is automatic and objective: for each question, did the file containing the real answer appear in the top-k chunks returned by the vector store?
+
+If the right file **is** retrieved → the LLM almost always answers correctly.
+If the right file **isn't** retrieved → no prompt or model can fix it; it was never in the context.
+
+This makes retrieval hit rate the single most actionable metric at this stage.
+
+### Key Terms
+
+| Term | Definition |
+|---|---|
+| **Hit** | The expected file appears at least once in the top-k retrieved chunks |
+| **Miss** | The expected file does not appear in top-k — the LLM will say "I don't know" |
+| **Hit rate** | hits / total questions × 100% |
+| **Recall curve** | Hit rate measured at different k values (k=5, 10, 20) — shows how much improvement you get by retrieving more chunks |
+| **Baseline** | The score before any improvements — used to prove future changes helped |
+
+### Baseline Scores (Phase 2, pure vector search)
+
+| k | Hit Rate |
+|---|---|
+| 5  | **76%** (13/17) |
+| 10 | **82%** (14/17) |
+| 20 | **88%** (15/17) |
+
+### What the Misses Tell Us
+
+All 4 misses at k=5 share the same pattern: the **route file** (e.g. `authRoutes.js`) is beaten by the **controller file** (e.g. `authController.js`).
+
+Why? The controller is much longer and contains more meaningful words. The embedding model finds it more semantically similar to questions like "what routes are available?". The route file is tiny (11 lines, just `router.post(...)` declarations) and lacks prose that matches the question.
+
+**This is the exact problem hybrid search (Phase 4) fixes.** BM25 keyword search finds `authRoutes.js` by matching the word "auth" in the filename — something semantic vectors can't do.

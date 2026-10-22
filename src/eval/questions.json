@@ -1,0 +1,104 @@
+[
+  {
+    "id": 1,
+    "question": "How does JWT token generation work and what does the token payload contain?",
+    "expectedFiles": ["backend/src/utils/generateToken.js"],
+    "notes": "generateToken signs userId and role, expires in 30d"
+  },
+  {
+    "id": 2,
+    "question": "How does the protect middleware verify JWT tokens from the Authorization header?",
+    "expectedFiles": ["backend/src/middleware/authMiddleware.js"],
+    "notes": "Extracts Bearer token, verifies with jwt.verify, attaches user to req"
+  },
+  {
+    "id": 3,
+    "question": "How does the OTP signup flow work step by step?",
+    "expectedFiles": ["backend/src/controllers/authController.js"],
+    "notes": "sendOtp and signup functions, 10-min expiry, bcrypt hash"
+  },
+  {
+    "id": 4,
+    "question": "How is Google OAuth login handled and which email domains are allowed?",
+    "expectedFiles": ["backend/src/controllers/authController.js"],
+    "notes": "googleAuth uses OAuth2Client, only @student.nitw.ac.in or @nitw.ac.in"
+  },
+  {
+    "id": 5,
+    "question": "How does the server connect to MongoDB?",
+    "expectedFiles": ["backend/src/config/db.js"],
+    "notes": "mongoose.connect with MONGO_URI, process.exit on failure"
+  },
+  {
+    "id": 6,
+    "question": "What routes are available under /api/auth?",
+    "expectedFiles": ["backend/src/routes/authRoutes.js"],
+    "notes": "send-otp, signup, login, google"
+  },
+  {
+    "id": 7,
+    "question": "What delivery actions can a user perform and what are their API endpoints?",
+    "expectedFiles": ["backend/src/routes/deliveryRoutes.js"],
+    "notes": "request, accept, pickup, deliver, rate, complaint, my-requests, my-accepted"
+  },
+  {
+    "id": 8,
+    "question": "What user profile and notification endpoints are available?",
+    "expectedFiles": ["backend/src/routes/userRoutes.js"],
+    "notes": "profile, credits, transactions, notifications, push-token"
+  },
+  {
+    "id": 9,
+    "question": "What admin capabilities exist for managing users and deliveries?",
+    "expectedFiles": ["backend/src/routes/adminRoutes.js"],
+    "notes": "getAllUsers, deleteUser, adjustCredits, getAllDeliveries, cancelDelivery, complaints"
+  },
+  {
+    "id": 10,
+    "question": "How does the admin role check work and what middleware enforces it?",
+    "expectedFiles": ["backend/src/middleware/adminMiddleware.js"],
+    "notes": "isAdmin checks req.user.role === 'admin', returns 403 otherwise"
+  },
+  {
+    "id": 11,
+    "question": "How is Socket.io initialized and how do users join their personal room?",
+    "expectedFiles": ["backend/src/socket.js"],
+    "notes": "initSocket, io.on connection, socket.join(userId)"
+  },
+  {
+    "id": 12,
+    "question": "How are all the API route groups registered on the Express app?",
+    "expectedFiles": ["backend/src/server.js"],
+    "notes": "app.use('/api/admin'), app.use('/api/auth'), etc."
+  },
+  {
+    "id": 13,
+    "question": "How does user login with email and password work?",
+    "expectedFiles": ["backend/src/controllers/authController.js"],
+    "notes": "login function, bcrypt.compare, generateToken"
+  },
+  {
+    "id": 14,
+    "question": "How does a delivery get accepted and what happens when it is picked up?",
+    "expectedFiles": ["backend/src/controllers/deliveryController.js"],
+    "notes": "acceptDelivery and verifyPickup functions"
+  },
+  {
+    "id": 15,
+    "question": "How is the server port configured and how does the HTTP server start?",
+    "expectedFiles": ["backend/src/server.js"],
+    "notes": "PORT env var with fallback 5000, http.createServer, server.listen"
+  },
+  {
+    "id": 16,
+    "question": "How is CORS configured on the Express app?",
+    "expectedFiles": ["backend/src/server.js"],
+    "notes": "app.use(cors()) — default allows all origins"
+  },
+  {
+    "id": 17,
+    "question": "How are OTP codes generated and what is their expiry time?",
+    "expectedFiles": ["backend/src/controllers/authController.js"],
+    "notes": "generateOtp makes 6-digit random, saved with expiresAt = now + 10 min"
+  }
+]
