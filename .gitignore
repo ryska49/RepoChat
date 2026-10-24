@@ -7,8 +7,8 @@ repos/
 # Node modules
 node_modules/
 
-# Vector store persistence (Phase 3)
-.chroma/
+# Saved vector index (Phase 3) — can be large, regenerate with node src/ingest.js
+.index/
 
 # Build artifacts
 dist/

@@ -162,3 +162,61 @@ All 4 misses at k=5 share the same pattern: the **route file** (e.g. `authRoutes
 Why? The controller is much longer and contains more meaningful words. The embedding model finds it more semantically similar to questions like "what routes are available?". The route file is tiny (11 lines, just `router.post(...)` declarations) and lacks prose that matches the question.
 
 **This is the exact problem hybrid search (Phase 4) fixes.** BM25 keyword search finds `authRoutes.js` by matching the word "auth" in the filename — something semantic vectors can't do.
+
+
+---
+
+## Phase 3 — Persistence and API
+
+### Why Persistence Matters
+
+Every time `ask.js` runs, it re-reads 23 files, splits them into 68 chunks, and runs each through the embedding model. That takes 30+ seconds. With persistence we serialize the vectors (just numbers) and document metadata to a JSON file. Next run: read the file, skip embedding, start in under 1 second.
+
+**What gets saved:** `{ entries: [{ vector: float[], doc: { pageContent, metadata } }] }`  
+**What doesn't get saved:** the embedding model itself (we re-load it on demand from HuggingFace cache)
+
+### Key Terms
+
+| Term | Definition |
+|---|---|
+| **SSE (Server-Sent Events)** | A simple HTTP protocol for server-to-client streaming. The server sends `data: ...\n\n` frames and keeps the connection open. The client reads them as they arrive. One-directional (server → client only). |
+| **async generator** | A JavaScript function that `yield`s values over time using `async function*`. LangChain's `.stream()` returns one — we iterate it with `for await (const chunk of stream)`. |
+| **chunked transfer encoding** | The HTTP mechanism that lets a server send a response in pieces. SSE uses this under the hood. |
+| **store cache (Map)** | The server keeps a `Map<repoPath, store>` so the second request to the same repo doesn't even read disk — the store is already in memory. |
+
+### The Two-Layer Cache
+
+```
+Request for repoPath
+        │
+        ▼
+Is it in storeCache (RAM)?  ──yes──▶  return immediately (fastest)
+        │ no
+        ▼
+Is there a .index/<name>.json?  ──yes──▶  load from disk + cache in RAM
+        │ no
+        ▼
+Full ingest: walk → split → embed → save to disk → cache in RAM
+```
+
+### Why SSE Over WebSockets?
+
+| | SSE | WebSocket |
+|---|---|---|
+| Direction | Server → Client only | Bidirectional |
+| Setup | Plain HTTP | Handshake upgrade |
+| Proxy/firewall friendly | ✅ Yes | ⚠️ Sometimes blocked |
+| Use case | Streaming LLM answers | Chat, games, live collab |
+
+For streaming a read-only LLM answer, SSE is simpler and sufficient.
+
+### SSE Event Types We Send
+
+```
+event: sources   ← file citations (emitted first, before answer starts)
+event: token     ← one text fragment from the LLM
+event: done      ← stream complete
+event: error     ← something went wrong
+```
+
+Sending `sources` first means the UI can render citation chips immediately while the answer is still streaming — a nice UX trick.

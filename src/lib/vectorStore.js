@@ -1,91 +1,136 @@
 /**
  * vectorStore.js
  *
- * A minimal hand-rolled in-memory vector store.
+ * A minimal hand-rolled in-memory vector store — now with disk persistence.
  *
- * WHY build our own?
- *   LangChain.js v1 removed MemoryVectorStore from its public API (it moved to
- *   an internal helper). Rather than chasing the new internal path (which may
- *   change again), we write the ~30 lines ourselves. It's a great way to
- *   understand what a vector store actually does:
+ * Phase 1: built cosine similarity search over an in-memory array.
+ * Phase 3: adds save() and load() so we never re-embed the same repo twice.
  *
- *     store  = array of { vector, document }
- *     search = embed the query, compute cosine similarity against every stored
- *              vector, return the top-k highest-scoring documents
+ * WHY JSON persistence instead of Chroma?
+ *   Chroma requires a running server (Docker or a separate process). For a
+ *   portfolio project, that's extra setup friction. Our JSON approach gives
+ *   the same "skip re-embedding" benefit with zero infrastructure — just a
+ *   file on disk. Swapping to Chroma later is a one-file change.
  *
- * HOW cosine similarity works:
- *   similarity(A, B) = (A · B) / (|A| * |B|)
- *   Two vectors pointing the same direction → similarity = 1.0  (identical meaning)
- *   Two vectors perpendicular              → similarity = 0.0  (unrelated)
- *   Because our embedder normalizes vectors (normalize:true), |A| = |B| = 1,
- *   so similarity = A · B  (just the dot product — very fast).
+ * HOW persistence works:
+ *   save() → serialises { entries: [{vector, metadata, pageContent}] } to JSON
+ *   load() → reads that JSON back and reconstructs the same store object
+ *   The embeddings object is NOT stored (no need — we only embed at ingest time)
  */
 
+import fs from "fs";
+import path from "path";
+
 // ---------------------------------------------------------------------------
-// Math helpers
+// Math helpers (same as Phase 1)
 // ---------------------------------------------------------------------------
 
-/** Dot product of two same-length arrays. */
 function dot(a, b) {
   let sum = 0;
   for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
   return sum;
 }
 
-/** L2 norm (length) of a vector. */
 function norm(a) {
   return Math.sqrt(dot(a, a));
 }
 
-/** Cosine similarity between two vectors (0–1 for normalized embeddings). */
 function cosineSimilarity(a, b) {
-  const denominator = norm(a) * norm(b);
-  if (denominator === 0) return 0;
-  return dot(a, b) / denominator;
+  const d = norm(a) * norm(b);
+  return d === 0 ? 0 : dot(a, b) / d;
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Store factory — returns the same store object shape as Phase 1,
+// now extended with save() and load()
 // ---------------------------------------------------------------------------
 
 /**
- * Builds an in-memory vector store from an array of LangChain Documents.
- * Returns a plain object (not a class) — a simple array with a search method.
+ * Builds an in-memory vector store from LangChain Documents.
  *
  * @param {import("@langchain/core/documents").Document[]} docs
  * @param {import("@langchain/core/embeddings").Embeddings} embeddings
- * @returns {Promise<{ search: (query: string, k: number) => Promise<Document[]> }>}
+ * @returns {Promise<VectorStore>}
  */
 export async function buildVectorStore(docs, embeddings) {
-  console.log(`  📦  Embedding ${docs.length} chunks — first run downloads the model (~22 MB)…`);
-
-  // Embed all document texts in one call (batched internally by the model)
+  console.log(`  📦  Embedding ${docs.length} chunks…`);
   const vectors = await embeddings.embedDocuments(docs.map(d => d.pageContent));
-
-  // Pair each vector with its document
   const entries = vectors.map((vector, i) => ({ vector, doc: docs[i] }));
-
   console.log(`  ✅  Vector store ready — ${entries.length} vectors in memory`);
+  return makeStore(entries, embeddings);
+}
 
+/**
+ * Loads a previously saved vector store from disk (skips re-embedding).
+ *
+ * @param {string} indexPath - Path to the saved .json index file
+ * @param {import("@langchain/core/embeddings").Embeddings} embeddings
+ * @returns {VectorStore}
+ */
+export function loadVectorStore(indexPath, embeddings) {
+  const raw = fs.readFileSync(indexPath, "utf-8");
+  const { entries } = JSON.parse(raw);
+  console.log(`  ✅  Loaded ${entries.length} vectors from ${indexPath}`);
+  return makeStore(entries, embeddings);
+}
+
+/**
+ * Checks whether a persisted index exists for a given repo path.
+ *
+ * @param {string} repoPath
+ * @returns {string|null} - The index file path if it exists, otherwise null
+ */
+export function findSavedIndex(repoPath) {
+  const p = indexPathFor(repoPath);
+  return fs.existsSync(p) ? p : null;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Deterministic index path for a repo — stored next to the repo in .index/
+ * e.g. repos/demo  →  .index/demo.json
+ */
+function indexPathFor(repoPath) {
+  const name = path.basename(path.resolve(repoPath));
+  return path.resolve(".index", `${name}.json`);
+}
+
+/**
+ * Creates the store object — a plain object with search() and save().
+ */
+function makeStore(entries, embeddings) {
   return {
     /**
-     * Find the top-k documents most similar to the query string.
-     * @param {string} query
-     * @param {number} k
-     * @returns {Promise<import("@langchain/core/documents").Document[]>}
+     * Cosine similarity search — identical to Phase 1.
      */
     async search(query, k = 5) {
       const queryVector = await embeddings.embedQuery(query);
-
-      // Score every entry and sort descending
       const scored = entries.map(({ vector, doc }) => ({
         doc,
         score: cosineSimilarity(queryVector, vector),
       }));
-
       scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, k).map(e => e.doc);
+    },
 
-      return scored.slice(0, k).map(({ doc }) => doc);
+    /**
+     * Persists the store to disk so future runs skip re-embedding.
+     * Creates the .index/ directory if it doesn't exist.
+     *
+     * @param {string} repoPath - Used to derive a deterministic file name
+     */
+    save(repoPath) {
+      const filePath = indexPathFor(repoPath);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+      // Serialize entries — vector (float array) + doc metadata + text
+      const data = JSON.stringify({ entries }, null, 0); // no pretty-print = smaller file
+      fs.writeFileSync(filePath, data, "utf-8");
+      console.log(`  💾  Index saved to ${filePath}`);
+      return filePath;
     },
   };
 }
