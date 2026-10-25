@@ -1,17 +1,11 @@
 /**
- * ask.js  —  CLI entry point for Phase 1
+ * ask.js  —  CLI entry point for Phase 1 & Phase 4
  *
  * Usage:
  *   node src/ask.js <path-to-repo> "<your question>"
  *
  * Example:
- *   node src/ask.js repos/demo "where is authentication handled?"
- *
- * What happens:
- *   1. Ingest the repo (walk → split → embed → in-memory store)
- *   2. Embed the question and retrieve the top-k closest chunks
- *   3. Send chunks + question to Groq (Llama 3.3 70B), receive a cited answer
- *   4. Print the answer and the raw retrieved chunks for inspection
+ *   node src/ask.js repos/demo "where is routing handled?"
  */
 
 import "dotenv/config";
@@ -45,23 +39,21 @@ console.log("=".repeat(60));
 
 // Step 1: Ingest (walk → split → embed → store)
 const store = await ingestRepo(repoPath);
+const retriever = store.asHybrid();
 
-// Step 2: Retrieve — store.search() is our hand-rolled cosine similarity search
-console.log(`\n🔎  Retrieving top ${topK} chunks…`);
-const docs = await store.search(question, topK);
+// Step 2: Retrieve — Hybrid Search (Vector + BM25 keyword search)
+console.log(`\n🔎  Retrieving top ${topK} chunks with Hybrid Search (BM25 + Vector)…`);
+const docs = await retriever.search(question, topK);
 
 // Step 3: Show retrieved sources (helpful for debugging / eval)
 console.log("\n📎  Retrieved sources:");
 for (const doc of docs) {
   const { source, startLine, endLine } = doc.metadata;
   const lineRange = startLine ? `L${startLine}-L${endLine}` : "?";
-  // Trim the repo root from path for readability
   const relPath = source.replace(repoPath, "").replace(/^[\\/]/, "");
   console.log(`  • ${relPath}:${lineRange}`);
 }
 
-// In debug mode (DEBUG=1 node src/ask.js ...) also print chunk text
-// so you can see exactly what the model is working with
 if (process.env.DEBUG === "1") {
   console.log("\n📄  Chunk contents:");
   for (const doc of docs) {
@@ -78,4 +70,3 @@ const answer = await generateAnswer(docs, question);
 console.log("─".repeat(60));
 console.log(answer);
 console.log("─".repeat(60));
-

@@ -220,3 +220,51 @@ event: error     ← something went wrong
 ```
 
 Sending `sources` first means the UI can render citation chips immediately while the answer is still streaming — a nice UX trick.
+
+
+---
+
+## Phase 4 — Hybrid Retrieval (BM25 Keyword + Vector Search)
+
+### Why Pure Vector Search Fails for Code
+
+Vector embeddings represent the overall *semantic meaning* of a sentence or block of text.
+In a codebase:
+- A route definition file (`authRoutes.js`) is often short and contains mostly boilerplate: `router.post('/login', login)`.
+- A controller (`authController.js`) is long, descriptive, and contains words like "password", "validation", "email", etc.
+
+When a user asks *"What routes are available under /api/auth?"*, the semantic vector often ranks the large controller higher than the actual route definition!
+
+### The Solution: Hybrid Search with BM25 & RRF
+
+1. **BM25 (Best Matching 25):** A probabilistic ranking function used in information retrieval (like Elasticsearch/Lucene). It scores exact word occurrences (Term Frequency) while penalizing overly common terms (Inverse Document Frequency) and normalizing for document length.
+2. **Reciprocal Rank Fusion (RRF):**
+   $$\text{RRF Score}(d) = \sum_{r \in \{\text{Vector, BM25}\}} \frac{1}{60 + \text{rank}_r(d)}$$
+   Because vector similarity (0 to 1) and BM25 scores (e.g., 0 to 45) have completely different scales, we cannot simply add them. RRF combines their *rankings* (1st, 2nd, 3rd) rather than raw numbers.
+
+### Evaluation Results: Before & After
+
+| k | Vector Search (Phase 2 Baseline) | Hybrid Search (Phase 4) | Improvement |
+|---|---|---|---|
+| **k=5** | 13/17 (76%) | **15/17 (88%)** | **+12%** |
+| **k=10** | 14/17 (82%) | **16/17 (94%)** | **+12%** |
+| **k=20** | 15/17 (88%) | **16/17 (94%)** | **+6%** |
+
+### Key Takeaway for Portfolio & Interviews
+
+Hybrid search solves the "exact keyword / identifier" blind spot of semantic search without adding heavy external infrastructure like Elasticsearch. By implementing BM25 and RRF in pure JS, the system remains lightweight, fully local, and yields measurable, quantifiable retrieval gains.
+
+
+---
+
+## Phase 5 — React Chat Interface & Interactive Citations
+
+### User Experience Architecture
+
+Terminal CLIs and raw JSON endpoints are great for testing, but real developers and hiring managers evaluate projects through a functional, responsive UI.
+
+Key UX features implemented in Phase 5:
+1. **ReadableStream SSE Consumer**: Consumes `text/event-stream` from Express `POST /ask` using native `fetch()` and `ReadableStreamDefaultReader`, parsing `event: token` frames and rendering live typing.
+2. **Interactive Citation Badges**: When the backend returns sources (e.g., `backend/src/routes/authRoutes.js:L1-L11`), they render as clickable pills.
+3. **In-Browser Code Preview Modal (`CodeModal.jsx`)**: Clicking any citation queries `GET /file?filePath=...` and displays the code with line numbers, automatically scrolling to and highlighting the exact cited lines.
+4. **Repository Selector**: Dynamically lists scanned repositories in `repos/` so users can switch between projects on the fly.

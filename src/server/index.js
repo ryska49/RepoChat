@@ -1,32 +1,19 @@
 /**
- * src/server/index.js  —  Express API server (Phase 3)
+ * src/server/index.js  —  Express API server (Phase 3, 4 & 5)
  *
- * Two endpoints:
- *
+ * Endpoints:
  *   POST /ingest
- *     Body: { "repoPath": "./repos/demo", "force": false }
- *     Walks + embeds a repo and saves the index to disk.
- *     Subsequent calls with the same repo are instant (loads from cache).
- *
- *   POST /ask
- *     Body: { "question": "...", "repoPath": "./repos/demo", "topK": 10 }
- *     Streams the answer back as Server-Sent Events (SSE).
- *     The client reads the stream token-by-token for a typing effect.
- *
- * WHY SSE instead of WebSockets?
- *   SSE is one-directional (server → client), which is all we need for
- *   streaming an LLM answer. It's simpler than WebSockets: just HTTP with
- *   chunked transfer encoding, works through proxies, and is natively
- *   supported by the browser's EventSource API and fetch().
- *
- * Run with:
- *   npm run serve
+ *   POST /ask (streaming SSE with Hybrid BM25 + Vector Search)
+ *   GET  /file (fetch code lines for interactive citation viewer)
+ *   GET  /repos (list available repositories)
+ *   GET  /health
  */
 
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 import { ingestRepo } from "../ingest.js";
 import { getEmbeddings } from "../lib/embedder.js";
 import { loadVectorStore, findSavedIndex } from "../lib/vectorStore.js";
@@ -38,20 +25,16 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
 
-// ---------------------------------------------------------------------------
-// In-memory cache of loaded stores so we don't re-read disk on every request
-// key: resolved repoPath, value: VectorStore
-// ---------------------------------------------------------------------------
+// In-memory cache of loaded stores
 const storeCache = new Map();
 
 async function getStore(repoPath, force = false) {
   const resolved = path.resolve(repoPath);
 
   if (!force && storeCache.has(resolved)) {
-    return storeCache.get(resolved); // already in memory this session
+    return storeCache.get(resolved);
   }
 
-  // Try loading from disk first (fast), fall back to full ingest (slow)
   let store;
   const savedPath = !force && findSavedIndex(resolved);
   if (savedPath) {
@@ -94,7 +77,7 @@ app.post("/ingest", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /ask  (streaming SSE)
+// POST /ask  (streaming SSE with Hybrid Search)
 // ---------------------------------------------------------------------------
 
 app.post("/ask", async (req, res) => {
@@ -104,35 +87,33 @@ app.post("/ask", async (req, res) => {
     return res.status(400).json({ error: "question is required" });
   }
 
-  // ── Set SSE headers BEFORE any async work so the client connects fast ──
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.flushHeaders(); // send headers immediately — client is now listening
+  res.flushHeaders();
 
-  /** Helper: send one SSE frame */
   const send = (event, data) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
   try {
-    // 1. Load (or build) the vector store for this repo
+    // 1. Load the vector store
     const store = await getStore(repoPath);
 
-    // 2. Retrieve top-k chunks
-    const docs = await store.search(question, topK);
+    // 2. Hybrid Retrieve top-k chunks (BM25 + Vector)
+    const hybridRetriever = store.asHybrid();
+    const docs = await hybridRetriever.search(question, topK);
 
-    // 3. Emit citation metadata first so the client can render sources immediately
+    // 3. Emit citation metadata first
     const absRepo = path.resolve(repoPath);
     const sources = docs.map(d => ({
-      // Return a relative path (strips the machine-specific repo root)
       file: d.metadata.source.replace(absRepo, "").replace(/^[\\/]/, "").replace(/\\/g, "/"),
       startLine: d.metadata.startLine,
       endLine: d.metadata.endLine,
     }));
     send("sources", { sources });
 
-    // 4. Stream the LLM answer token by token
+    // 4. Stream the LLM answer
     for await (const token of streamAnswer(docs, question)) {
       send("token", { token });
     }
@@ -149,6 +130,53 @@ app.post("/ask", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /file (Fetches raw file content for citation preview)
+// ---------------------------------------------------------------------------
+
+app.get("/file", (req, res) => {
+  const { repoPath = "repos/demo", filePath } = req.query;
+  if (!filePath) {
+    return res.status(400).json({ error: "filePath is required" });
+  }
+
+  const safeRepo = path.resolve(repoPath);
+  const targetPath = path.resolve(safeRepo, filePath);
+
+  // Security: prevent path traversal outside repo root
+  if (!targetPath.startsWith(safeRepo)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  if (!fs.existsSync(targetPath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+
+  try {
+    const content = fs.readFileSync(targetPath, "utf-8");
+    res.json({ content, filePath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /repos (Lists available repos)
+// ---------------------------------------------------------------------------
+
+app.get("/repos", (_req, res) => {
+  const reposDir = path.resolve("repos");
+  if (!fs.existsSync(reposDir)) {
+    return res.json({ repos: ["repos/demo"] });
+  }
+
+  const entries = fs.readdirSync(reposDir, { withFileTypes: true })
+    .filter(e => e.isDirectory())
+    .map(e => `repos/${e.name}`);
+
+  res.json({ repos: entries.length > 0 ? entries : ["repos/demo"] });
+});
+
+// ---------------------------------------------------------------------------
 // Health check
 // ---------------------------------------------------------------------------
 
@@ -156,13 +184,11 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, uptime: process.uptime() });
 });
 
-// ---------------------------------------------------------------------------
-// Start
-// ---------------------------------------------------------------------------
-
 app.listen(PORT, () => {
   console.log(`\n🚀  Codebase Q&A API running at http://localhost:${PORT}`);
   console.log(`    POST /ingest  { repoPath }`);
   console.log(`    POST /ask     { question, repoPath, topK }`);
+  console.log(`    GET  /file    ?repoPath=...&filePath=...`);
+  console.log(`    GET  /repos`);
   console.log(`    GET  /health\n`);
 });

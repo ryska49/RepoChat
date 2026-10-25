@@ -1,23 +1,11 @@
 /**
- * evaluate.js  —  Phase 2 eval harness
+ * evaluate.js  —  Phase 4 Eval Harness: Vector vs Hybrid (BM25 + Vector)
  *
- * Measures RETRIEVAL hit rate: for each question, did the expected file
- * appear anywhere in the top-k retrieved chunks?
- *
- * WHY retrieval hit rate (not answer quality)?
- *   Answer quality requires a human to judge each response, which doesn't
- *   scale.  Retrieval hit rate is automatic, objective, and directly measures
- *   the thing most likely to cause "I don't have enough context" failures:
- *   the right file not making it into the top-k.
- *
- *   If the right file IS retrieved, the LLM usually answers correctly.
- *   If it ISN'T retrieved, no prompt engineering can save you.
- *   So retrieval hit rate is the single most useful metric at this stage.
+ * Compares:
+ *   1. Vector-only Retrieval (Phase 2 baseline)
+ *   2. Hybrid Retrieval (BM25 + Vector with Reciprocal Rank Fusion)
  *
  * Usage:
- *   node src/eval/evaluate.js <path-to-repo>
- *
- * Example:
  *   node src/eval/evaluate.js repos/demo
  */
 
@@ -26,98 +14,96 @@ import path from "path";
 import { ingestRepo } from "../ingest.js";
 import questions from "./questions.json" with { type: "json" };
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
 const repoPath = path.resolve(process.argv[2] ?? "repos/demo");
-
-// We test at multiple k values to understand the recall curve:
-//   k=5  → what the user sees by default
-//   k=10 → with the current workaround
-//   k=20 → near-exhaustive for this small repo
 const K_VALUES = [5, 10, 20];
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-console.log("=".repeat(60));
-console.log("  📊  CampusCourier Retrieval Eval");
+console.log("=".repeat(65));
+console.log("  📊  CampusCourier Retrieval Eval: Vector vs Hybrid (BM25)");
 console.log(`  Repo: ${repoPath}`);
 console.log(`  Questions: ${questions.length}`);
-console.log("=".repeat(60));
+console.log("=".repeat(65));
 
-// Step 1: Ingest once, reuse for all questions
+// Step 1: Load or ingest store
 const store = await ingestRepo(repoPath);
-console.log("\nRunning evaluation…\n");
+const hybridRetriever = store.asHybrid();
 
-// Step 2: For each k, run all questions and count hits
-const results = {}; // k -> { hits, misses: [{id, question, expected, got}] }
+console.log("\nRunning evaluation on both retrievers…\n");
 
-for (const k of K_VALUES) {
-  results[k] = { hits: 0, misses: [] };
+async function evaluateRetriever(retriever, isHybrid = false) {
+  const res = {};
+  for (const k of K_VALUES) {
+    res[k] = { hits: 0, misses: [] };
+    for (const q of questions) {
+      const docs = await retriever.search(q.question, k);
 
-  for (const q of questions) {
-    const docs = await store.search(q.question, k);
+      const retrievedPaths = docs.map((d) =>
+        d.metadata.source
+          .replace(/\\/g, "/")
+          .split("/repos/demo/")[1] ?? d.metadata.source
+      );
 
-    // Retrieve the relative file paths of returned chunks
-    const retrievedPaths = docs.map((d) =>
-      // Normalise separators and strip the repo root so we can compare
-      // "backend/src/routes/authRoutes.js" against the expected value
-      d.metadata.source
-        .replace(/\\/g, "/")          // Windows backslashes → forward
-        .split("/repos/demo/")[1]     // strip everything up to the repo root
-        ?? d.metadata.source
-    );
+      const hit = q.expectedFiles.some((expected) =>
+        retrievedPaths.some((rp) => rp && rp.includes(expected.replace(/\\/g, "/")))
+      );
 
-    // A hit = at least one expected file appears in the retrieved paths
-    const hit = q.expectedFiles.some((expected) =>
-      retrievedPaths.some((rp) => rp && rp.includes(expected.replace(/\\/g, "/")))
-    );
-
-    if (hit) {
-      results[k].hits++;
-    } else {
-      results[k].misses.push({
-        id: q.id,
-        question: q.question,
-        expected: q.expectedFiles,
-        retrieved: retrievedPaths.slice(0, 3), // show top-3 for debugging
-      });
+      if (hit) {
+        res[k].hits++;
+      } else {
+        res[k].misses.push({
+          id: q.id,
+          question: q.question,
+          expected: q.expectedFiles,
+          retrieved: retrievedPaths.slice(0, 3),
+        });
+      }
     }
   }
+  return res;
 }
 
+const vectorResults = await evaluateRetriever(store, false);
+const hybridResults = await evaluateRetriever(hybridRetriever, true);
+
 // ---------------------------------------------------------------------------
-// Print results
+// Print Comparison Table
 // ---------------------------------------------------------------------------
 
-console.log("─".repeat(60));
-console.log("  RETRIEVAL HIT RATE (did the right file appear in top-k?)");
-console.log("─".repeat(60));
+console.log("─".repeat(65));
+console.log("  RETRIEVAL HIT RATE COMPARISON");
+console.log("─".repeat(65));
+console.log("  k    │ Vector (Baseline) │ Hybrid (BM25 + Vector) │ Improvement");
+console.log("───────┼───────────────────┼────────────────────────┼────────────");
+
+const total = questions.length;
 
 for (const k of K_VALUES) {
-  const { hits } = results[k];
-  const total = questions.length;
-  const pct = ((hits / total) * 100).toFixed(0);
-  const bar = "█".repeat(Math.round(hits / total * 20)).padEnd(20, "░");
-  console.log(`  k=${String(k).padEnd(3)} │ ${bar} │ ${hits}/${total} (${pct}%)`);
+  const vHits = vectorResults[k].hits;
+  const hHits = hybridResults[k].hits;
+  const vPct = ((vHits / total) * 100).toFixed(0);
+  const hPct = ((hHits / total) * 100).toFixed(0);
+  const diff = hHits - vHits;
+  const diffStr = diff > 0 ? `+${diff} (+${(((hHits - vHits) / total) * 100).toFixed(0)}%)` : (diff === 0 ? "0 (tie)" : `${diff}`);
+
+  console.log(
+    `  k=${String(k).padEnd(3)} │ ${String(vHits).padStart(2)}/${total} (${String(vPct).padStart(2)}%)      │ ${String(hHits).padStart(2)}/${total} (${String(hPct).padStart(2)}%)           │ ${diffStr}`
+  );
 }
 
-// Show misses at the default k=5 so we know what to fix
-const defaultK = 5;
-const { misses } = results[defaultK];
+console.log("─".repeat(65));
 
-if (misses.length > 0) {
-  console.log(`\n  ❌  Misses at k=${defaultK} (${misses.length} questions):`);
-  for (const m of misses) {
+// Show misses at k=5 for Hybrid
+const defaultK = 5;
+const hMisses = hybridResults[defaultK].misses;
+
+if (hMisses.length > 0) {
+  console.log(`\n  Remaining misses in Hybrid at k=${defaultK} (${hMisses.length} questions):`);
+  for (const m of hMisses) {
     console.log(`\n  Q${m.id}: "${m.question}"`);
     console.log(`    Expected : ${m.expected.join(", ")}`);
     console.log(`    Retrieved: ${m.retrieved.join(", ") || "(none)"}`);
   }
+} else {
+  console.log(`\n  🎉 Zero misses at k=${defaultK}! Perfect 100% retrieval.`);
 }
 
-console.log("\n" + "─".repeat(60));
-console.log("  ✅  Baseline recorded. Re-run after Phase 4 to compare.");
-console.log("─".repeat(60) + "\n");
+console.log("\n" + "=".repeat(65) + "\n");

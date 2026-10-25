@@ -6,7 +6,8 @@
   "scripts": {
     "ask": "node src/ask.js",
     "serve": "node src/server/index.js",
-    "eval": "node src/eval/evaluate.js repos/demo"
+    "eval": "node src/eval/evaluate.js repos/demo",
+    "frontend": "npm run dev --prefix frontend"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

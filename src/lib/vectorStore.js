@@ -20,6 +20,7 @@
 
 import fs from "fs";
 import path from "path";
+import { HybridRetriever } from "./hybridRetriever.js";
 
 // ---------------------------------------------------------------------------
 // Math helpers (same as Phase 1)
@@ -114,6 +115,20 @@ function makeStore(entries, embeddings) {
       }));
       scored.sort((a, b) => b.score - a.score);
       return scored.slice(0, k).map(e => e.doc);
+    },
+
+    /**
+     * Returns all stored documents.
+     */
+    getDocs() {
+      return entries.map(e => e.doc);
+    },
+
+    /**
+     * Returns a HybridRetriever combining this vector store + BM25 keyword search.
+     */
+    asHybrid() {
+      return new HybridRetriever(this, entries.map(e => e.doc));
     },
 
     /**
