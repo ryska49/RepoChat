@@ -1,0 +1,17 @@
+[33mcommit 63695bb771ed82685400b91d5b3a967e68944810[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: Rishabh <rishabchandel2002@gmail.com>
+Date:   Sat Oct 24 11:54:47 2026 +0530
+
+    Now embeddings can be stored in local machine for reusing and index.js added
+
+[33mcommit 51627f432e965443b8f4772d726b6c3d6e459b62[m
+Author: Rishabh <rishabchandel2002@gmail.com>
+Date:   Thu Oct 22 22:10:09 2026 +0530
+
+    Add evaluation.js for evaluating the model performance
+
+[33mcommit fee3175e1b7fd45ba4e27774914d46f2fbcc3b6d[m
+Author: Rishabh <rishabchandel2002@gmail.com>
+Date:   Thu Oct 22 20:00:32 2026 +0530
+
+    Initial working repo or prototype

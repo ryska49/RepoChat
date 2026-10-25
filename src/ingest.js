@@ -46,6 +46,10 @@ export async function ingestRepo(repoPath, { force = false } = {}) {
   const files = loadRepoFiles(repoPath);
   console.log(`  📄  Found ${files.length} source files`);
 
+  if (files.length === 0) {
+    throw new Error(`No recognized source code files found in "${repoPath}". Please verify the folder exists and contains code files.`);
+  }
+
   console.log(`\n✂️   Splitting files into chunks…`);
   const docs = await splitFiles(files);
   console.log(`  📄  Produced ${docs.length} chunks`);
@@ -63,7 +67,7 @@ export async function ingestRepo(repoPath, { force = false } = {}) {
 // CLI entry point: node src/ingest.js <repo-path> [--force]
 // ---------------------------------------------------------------------------
 
-if (process.argv[1].endsWith("ingest.js")) {
+if (process.argv[1]?.endsWith("ingest.js")) {
   const args = process.argv.slice(2);
   const repoPath = args.find(a => !a.startsWith("--"));
   const force = args.includes("--force");

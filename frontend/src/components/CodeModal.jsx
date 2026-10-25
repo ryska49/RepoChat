@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { X, FileCode, Copy, Check } from "lucide-react";
+import { X, FileCode2, Copy, Check, Hash } from "lucide-react";
 
 export default function CodeModal({ citation, repoPath, onClose }) {
   const [fileContent, setFileContent] = useState(null);
@@ -55,9 +55,9 @@ export default function CodeModal({ citation, repoPath, onClose }) {
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 50,
-        background: "rgba(3, 7, 18, 0.8)",
-        backdropFilter: "blur(8px)",
+        zIndex: 100,
+        backgroundColor: "rgba(0, 0, 0, 0.75)",
+        backdropFilter: "blur(4px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -66,15 +66,17 @@ export default function CodeModal({ citation, repoPath, onClose }) {
       onClick={onClose}
     >
       <div
-        className="glass-panel"
         style={{
           width: "100%",
           maxWidth: "880px",
           height: "80vh",
           display: "flex",
           flexDirection: "column",
+          borderRadius: "8px",
+          backgroundColor: "#0d0e12",
+          border: "1px solid var(--border-subtle)",
+          boxShadow: "0 20px 40px -15px rgba(0, 0, 0, 0.9)",
           overflow: "hidden",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.7)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -84,28 +86,33 @@ export default function CodeModal({ citation, repoPath, onClose }) {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "0.875rem 1.25rem",
+            padding: "0.75rem 1.25rem",
+            backgroundColor: "var(--bg-surface)",
             borderBottom: "1px solid var(--border-subtle)",
-            background: "rgba(10, 13, 20, 0.9)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <FileCode size={18} color="var(--accent-cyan)" />
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.875rem", fontWeight: 600 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+            <FileCode2 size={16} color="var(--accent-cyan)" />
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.8125rem", fontWeight: 500, color: "var(--text-primary)" }}>
               {citation.file}
             </span>
-            {startLine && endLine && (
+            {startLine && (
               <span
                 style={{
-                  background: "rgba(59, 130, 246, 0.15)",
-                  color: "var(--accent-blue)",
-                  padding: "0.15rem 0.5rem",
-                  borderRadius: "9999px",
-                  fontSize: "0.75rem",
+                  backgroundColor: "rgba(56, 189, 248, 0.1)",
+                  color: "var(--accent-cyan)",
+                  border: "1px solid rgba(56, 189, 248, 0.2)",
+                  padding: "0.1rem 0.45rem",
+                  borderRadius: "4px",
+                  fontSize: "0.6875rem",
                   fontFamily: "var(--font-mono)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.2rem",
                 }}
               >
-                Lines {startLine}–{endLine}
+                <Hash size={10} />
+                Lines {startLine}–{endLine || startLine}
               </span>
             )}
           </div>
@@ -114,20 +121,23 @@ export default function CodeModal({ citation, repoPath, onClose }) {
             <button
               onClick={handleCopy}
               style={{
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
-                gap: "0.35rem",
-                padding: "0.35rem 0.65rem",
-                borderRadius: "6px",
+                gap: "0.3rem",
+                padding: "0.3rem 0.6rem",
+                borderRadius: "4px",
                 border: "1px solid var(--border-subtle)",
-                background: "var(--bg-tertiary)",
+                backgroundColor: "var(--bg-card)",
                 color: "var(--text-secondary)",
                 cursor: "pointer",
                 fontSize: "0.75rem",
+                transition: "all 0.15s ease",
               }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--border-hover)")}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
             >
-              {copied ? <Check size={14} color="var(--accent-emerald)" /> : <Copy size={14} />}
-              {copied ? "Copied" : "Copy Snippet"}
+              {copied ? <Check size={12} color="var(--accent-emerald)" /> : <Copy size={12} />}
+              <span>{copied ? "Copied" : "Copy Snippet"}</span>
             </button>
             <button
               onClick={onClose}
@@ -136,13 +146,15 @@ export default function CodeModal({ citation, repoPath, onClose }) {
                 border: "none",
                 color: "var(--text-muted)",
                 cursor: "pointer",
-                padding: "0.25rem",
-                borderRadius: "6px",
+                padding: "0.3rem",
+                borderRadius: "4px",
                 display: "flex",
                 alignItems: "center",
               }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
             >
-              <X size={20} />
+              <X size={18} />
             </button>
           </div>
         </div>
@@ -152,15 +164,15 @@ export default function CodeModal({ citation, repoPath, onClose }) {
           style={{
             flex: 1,
             overflowY: "auto",
-            padding: "1rem 0",
-            background: "var(--code-bg)",
+            padding: "0.75rem 0",
+            backgroundColor: "var(--code-bg)",
             fontFamily: "var(--font-mono)",
             fontSize: "0.8125rem",
             lineHeight: 1.6,
           }}
         >
           {loading ? (
-            <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)" }}>
+            <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.8125rem" }}>
               Loading file snippet...
             </div>
           ) : (
@@ -176,23 +188,30 @@ export default function CodeModal({ citation, repoPath, onClose }) {
                   style={{
                     display: "flex",
                     padding: "0 1.25rem",
-                    background: isHighlighted ? "rgba(59, 130, 246, 0.12)" : "transparent",
-                    borderLeft: isHighlighted ? "3px solid var(--accent-blue)" : "3px solid transparent",
+                    backgroundColor: isHighlighted ? "rgba(59, 130, 246, 0.08)" : "transparent",
+                    borderLeft: isHighlighted ? "3px solid var(--accent-primary)" : "3px solid transparent",
                   }}
                 >
                   <span
                     style={{
-                      width: "3.5rem",
+                      width: "3rem",
                       textAlign: "right",
                       paddingRight: "1.25rem",
                       color: isHighlighted ? "var(--accent-cyan)" : "var(--text-muted)",
                       userSelect: "none",
                       flexShrink: 0,
+                      opacity: isHighlighted ? 1 : 0.6,
                     }}
                   >
                     {lineNum}
                   </span>
-                  <span style={{ color: isHighlighted ? "#ffffff" : "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                  <span
+                    style={{
+                      color: isHighlighted ? "#f8fafc" : "#94a3b8",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-all",
+                    }}
+                  >
                     {lineText || " "}
                   </span>
                 </div>

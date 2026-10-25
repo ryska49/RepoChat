@@ -14,10 +14,12 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
+import { execSync } from "child_process";
 import { ingestRepo } from "../ingest.js";
 import { getEmbeddings } from "../lib/embedder.js";
 import { loadVectorStore, findSavedIndex } from "../lib/vectorStore.js";
 import { streamAnswer } from "../lib/retriever.js";
+import { getRegistry } from "../lib/registry.js";
 
 const app = express();
 app.use(cors());
@@ -29,15 +31,18 @@ const PORT = process.env.PORT || 3001;
 const storeCache = new Map();
 
 async function getStore(repoPath, force = false) {
-  const resolved = path.resolve(repoPath);
+  const registry = getRegistry();
+  const matched = registry.find(r => r.id === repoPath || r.name === repoPath || r.path === repoPath);
+  const targetPath = matched ? matched.path : repoPath;
+  const resolved = path.resolve(targetPath);
 
   if (!force && storeCache.has(resolved)) {
     return storeCache.get(resolved);
   }
 
   let store;
-  const savedPath = !force && findSavedIndex(resolved);
-  if (savedPath) {
+  const savedPath = !force && (matched?.indexPath || findSavedIndex(resolved) || findSavedIndex(repoPath));
+  if (savedPath && fs.existsSync(savedPath)) {
     console.log(`[ingest] Loading from disk: ${savedPath}`);
     store = loadVectorStore(savedPath, getEmbeddings());
   } else {
@@ -54,20 +59,58 @@ async function getStore(repoPath, force = false) {
 // ---------------------------------------------------------------------------
 
 app.post("/ingest", async (req, res) => {
-  const { repoPath, force = false } = req.body;
+  let { repoPath, force = false } = req.body;
 
-  if (!repoPath) {
-    return res.status(400).json({ error: "repoPath is required" });
+  if (!repoPath || typeof repoPath !== "string") {
+    return res.status(400).json({ error: "repoPath or GitHub URL is required" });
+  }
+
+  repoPath = repoPath.trim();
+
+  // Normalize shorthand GitHub URLs e.g. "expressjs/express" -> "https://github.com/expressjs/express"
+  if (/^[a-zA-Z0-9_\-.]+\/[a-zA-Z0-9_\-.]+$/.test(repoPath) && !fs.existsSync(path.resolve(repoPath))) {
+    repoPath = `https://github.com/${repoPath}`;
+  }
+
+  // Handle GitHub URLs
+  if (repoPath.startsWith("http://") || repoPath.startsWith("https://") || repoPath.startsWith("git@")) {
+    try {
+      const cleanUrl = repoPath.replace(/\.git$/, "").replace(/\/+$/, "");
+      const repoName = cleanUrl.split("/").pop() || "cloned-repo";
+      const targetDir = path.resolve("repos", repoName);
+
+      if (!fs.existsSync(targetDir)) {
+        console.log(`[git] Cloning ${cleanUrl} into ${targetDir}...`);
+        fs.mkdirSync(path.dirname(targetDir), { recursive: true });
+        // Set a 2-minute timeout for cloning
+        execSync(`git clone --depth 1 "${cleanUrl}" "${targetDir}"`, {
+          stdio: "pipe",
+          timeout: 120000,
+        });
+        console.log(`[git] Clone completed successfully for ${repoName}!`);
+      } else {
+        console.log(`[git] Repo already exists locally at ${targetDir}`);
+      }
+
+      repoPath = `repos/${repoName}`;
+    } catch (cloneErr) {
+      console.error("[git clone error]", cloneErr);
+      const errMsg = cloneErr.stderr ? cloneErr.stderr.toString() : cloneErr.message;
+      return res.status(500).json({ error: `Git clone failed: ${errMsg}` });
+    }
   }
 
   try {
     const start = Date.now();
-    await getStore(repoPath, force);
+    const store = await getStore(repoPath, force);
     const ms = Date.now() - start;
+    const docs = store.getDocs ? store.getDocs() : [];
 
     res.json({
       ok: true,
       repoPath,
+      name: path.basename(path.resolve(repoPath)),
+      chunkCount: docs.length,
       message: force ? `Re-ingested in ${ms}ms` : `Ready in ${ms}ms (loaded from cache if available)`,
     });
   } catch (err) {
@@ -164,16 +207,8 @@ app.get("/file", (req, res) => {
 // ---------------------------------------------------------------------------
 
 app.get("/repos", (_req, res) => {
-  const reposDir = path.resolve("repos");
-  if (!fs.existsSync(reposDir)) {
-    return res.json({ repos: ["repos/demo"] });
-  }
-
-  const entries = fs.readdirSync(reposDir, { withFileTypes: true })
-    .filter(e => e.isDirectory())
-    .map(e => `repos/${e.name}`);
-
-  res.json({ repos: entries.length > 0 ? entries : ["repos/demo"] });
+  const list = getRegistry();
+  res.json({ repos: list });
 });
 
 // ---------------------------------------------------------------------------

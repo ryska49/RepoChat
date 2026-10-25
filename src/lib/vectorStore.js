@@ -21,6 +21,7 @@
 import fs from "fs";
 import path from "path";
 import { HybridRetriever } from "./hybridRetriever.js";
+import { registerRepo } from "./registry.js";
 
 // ---------------------------------------------------------------------------
 // Math helpers (same as Phase 1)
@@ -145,6 +146,11 @@ function makeStore(entries, embeddings) {
       const data = JSON.stringify({ entries }, null, 0); // no pretty-print = smaller file
       fs.writeFileSync(filePath, data, "utf-8");
       console.log(`  💾  Index saved to ${filePath}`);
+
+      // Register repository in catalog
+      const name = path.basename(path.resolve(repoPath));
+      registerRepo(name, repoPath, entries.length);
+
       return filePath;
     },
   };
