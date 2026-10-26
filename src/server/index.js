@@ -30,11 +30,17 @@ const PORT = process.env.PORT || 3001;
 // In-memory cache of loaded stores
 const storeCache = new Map();
 
-async function getStore(repoPath, force = false) {
+export function resolveRepoDirectory(repoPath) {
   const registry = getRegistry();
   const matched = registry.find(r => r.id === repoPath || r.name === repoPath || r.path === repoPath);
   const targetPath = matched ? matched.path : repoPath;
-  const resolved = path.resolve(targetPath);
+  return path.resolve(targetPath);
+}
+
+async function getStore(repoPath, force = false) {
+  const registry = getRegistry();
+  const matched = registry.find(r => r.id === repoPath || r.name === repoPath || r.path === repoPath);
+  const resolved = resolveRepoDirectory(repoPath);
 
   if (!force && storeCache.has(resolved)) {
     return storeCache.get(resolved);
@@ -148,12 +154,24 @@ app.post("/ask", async (req, res) => {
     const docs = await hybridRetriever.search(question, topK);
 
     // 3. Emit citation metadata first
-    const absRepo = path.resolve(repoPath);
-    const sources = docs.map(d => ({
-      file: d.metadata.source.replace(absRepo, "").replace(/^[\\/]/, "").replace(/\\/g, "/"),
-      startLine: d.metadata.startLine,
-      endLine: d.metadata.endLine,
-    }));
+    const absRepo = resolveRepoDirectory(repoPath);
+    const sources = docs.map(d => {
+      let rawPath = d.metadata?.source || d.metadata?.filePath || "";
+      let relPath = rawPath;
+      if (path.isAbsolute(rawPath)) {
+        try {
+          const rel = path.relative(absRepo, rawPath);
+          if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+            relPath = rel;
+          }
+        } catch {}
+      }
+      return {
+        file: relPath.replace(/\\/g, "/"),
+        startLine: d.metadata?.startLine ?? 1,
+        endLine: d.metadata?.endLine ?? 1,
+      };
+    });
     send("sources", { sources });
 
     // 4. Stream the LLM answer
@@ -176,30 +194,68 @@ app.post("/ask", async (req, res) => {
 // GET /file (Fetches raw file content for citation preview)
 // ---------------------------------------------------------------------------
 
-app.get("/file", (req, res) => {
-  const { repoPath = "repos/demo", filePath } = req.query;
-  if (!filePath) {
+app.get("/file", async (req, res) => {
+  let { repoPath = "repos/demo", filePath } = req.query;
+  if (!filePath || typeof filePath !== "string") {
     return res.status(400).json({ error: "filePath is required" });
   }
 
-  const safeRepo = path.resolve(repoPath);
-  const targetPath = path.resolve(safeRepo, filePath);
+  filePath = filePath.trim().replace(/\\/g, "/");
 
-  // Security: prevent path traversal outside repo root
-  if (!targetPath.startsWith(safeRepo)) {
-    return res.status(403).json({ error: "Access denied" });
+  // If filePath accidentally received just drive letter "C" or invalid prefix
+  if (filePath.length <= 2 && /^[a-zA-Z]:?$/.test(filePath)) {
+    return res.status(400).json({ error: "Invalid filePath" });
   }
 
-  if (!fs.existsSync(targetPath)) {
-    return res.status(404).json({ error: "File not found" });
+  const safeRepo = resolveRepoDirectory(repoPath);
+
+  // If filePath has repos/<repoName>/ prefix, clean it
+  const reposMatch = filePath.match(/(?:^|\/)repos\/[^/]+\/(.*)$/i);
+  const cleanRel = reposMatch ? reposMatch[1] : filePath;
+
+  // Candidate paths to check on local disk
+  const candidates = [
+    path.resolve(safeRepo, cleanRel),
+    path.resolve(safeRepo, filePath),
+    path.isAbsolute(filePath) ? path.resolve(filePath) : null,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      try {
+        const content = fs.readFileSync(candidate, "utf-8");
+        return res.json({ content, filePath: cleanRel });
+      } catch (err) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
   }
 
+  // 2. Fallback: If local file is missing on disk (e.g. index exists but repo wasn't cloned locally),
+  // retrieve the chunk snippet directly from the vector store so preview never fails!
   try {
-    const content = fs.readFileSync(targetPath, "utf-8");
-    res.json({ content, filePath });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const store = await getStore(repoPath);
+    const docs = store.getDocs ? store.getDocs() : [];
+    const normalizedTarget = cleanRel.toLowerCase();
+    const baseTarget = path.basename(cleanRel).toLowerCase();
+
+    const matchingDoc = docs.find(d => {
+      const src = (d.metadata?.source || d.metadata?.filePath || "").replace(/\\/g, "/").toLowerCase();
+      return src.endsWith(normalizedTarget) || normalizedTarget.endsWith(src) || src.endsWith("/" + baseTarget);
+    });
+
+    if (matchingDoc) {
+      return res.json({
+        content: matchingDoc.pageContent,
+        filePath: cleanRel,
+        fromIndex: true,
+      });
+    }
+  } catch (storeErr) {
+    console.warn("[file fallback store warning]", storeErr.message);
   }
+
+  return res.status(404).json({ error: "File not found" });
 });
 
 // ---------------------------------------------------------------------------

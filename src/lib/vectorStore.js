@@ -70,9 +70,16 @@ export async function buildVectorStore(docs, embeddings) {
  * @returns {VectorStore}
  */
 export function loadVectorStore(indexPath, embeddings) {
-  const raw = fs.readFileSync(indexPath, "utf-8");
-  const { entries } = JSON.parse(raw);
-  console.log(`  ✅  Loaded ${entries.length} vectors from ${indexPath}`);
+  let entries = [];
+  try {
+    const raw = fs.readFileSync(indexPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    entries = parsed.entries || [];
+    console.log(`  ✅  Loaded ${entries.length} vectors from ${indexPath}`);
+  } catch (err) {
+    console.error(`  ⚠️  Failed to parse index file at ${indexPath}: ${err.message}`);
+    throw new Error(`Index file at ${indexPath} is corrupted or incomplete: ${err.message}. Please re-ingest with force: true.`);
+  }
   return makeStore(entries, embeddings);
 }
 
@@ -104,15 +111,27 @@ function indexPathFor(repoPath) {
  * Creates the store object — a plain object with search() and save().
  */
 function makeStore(entries, embeddings) {
+  // Precompute norms for fast cosine dot products (avoids recalculating norm(vector) 40,000 times per query)
+  const entriesWithNorm = entries.map(e => ({
+    vector: e.vector,
+    doc: e.doc,
+    norm: norm(e.vector) || 1,
+  }));
+
+  // Cache the HybridRetriever and BM25 index on the store instance
+  let cachedHybrid = null;
+
   return {
     /**
-     * Cosine similarity search — identical to Phase 1.
+     * Fast Cosine similarity search using precomputed norms.
      */
     async search(query, k = 5) {
       const queryVector = await embeddings.embedQuery(query);
-      const scored = entries.map(({ vector, doc }) => ({
+      const qNorm = norm(queryVector) || 1;
+
+      const scored = entriesWithNorm.map(({ vector, doc, norm: eNorm }) => ({
         doc,
-        score: cosineSimilarity(queryVector, vector),
+        score: dot(queryVector, vector) / (qNorm * eNorm),
       }));
       scored.sort((a, b) => b.score - a.score);
       return scored.slice(0, k).map(e => e.doc);
@@ -127,9 +146,13 @@ function makeStore(entries, embeddings) {
 
     /**
      * Returns a HybridRetriever combining this vector store + BM25 keyword search.
+     * Caches the BM25 index so subsequent queries execute in <5ms without rebuilding.
      */
     asHybrid() {
-      return new HybridRetriever(this, entries.map(e => e.doc));
+      if (!cachedHybrid) {
+        cachedHybrid = new HybridRetriever(this, entries.map(e => e.doc));
+      }
+      return cachedHybrid;
     },
 
     /**

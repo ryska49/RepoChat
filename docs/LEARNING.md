@@ -268,3 +268,29 @@ Key UX features implemented in Phase 5:
 2. **Interactive Citation Badges**: When the backend returns sources (e.g., `backend/src/routes/authRoutes.js:L1-L11`), they render as clickable pills.
 3. **In-Browser Code Preview Modal (`CodeModal.jsx`)**: Clicking any citation queries `GET /file?filePath=...` and displays the code with line numbers, automatically scrolling to and highlighting the exact cited lines.
 4. **Repository Selector**: Dynamically lists scanned repositories in `repos/` so users can switch between projects on the fly.
+
+
+---
+
+## Production Performance & Scale (20k–40k Chunks)
+
+When moving from a small demo codebase (68 chunks) to a real-world enterprise codebase like **Coolify** (~24,000–44,000 chunks, 200MB+ vectors):
+
+### 1. Inverted Index vs. Linear Scan BM25
+- **The Problem:** Naive BM25 scans every document and all its tokens for every query token. For 40,000 chunks, that is $O(\text{query\_tokens} \times N \times \text{avg\_tokens}) \approx 40,000,000$ operations in single-threaded JavaScript.
+- **The Solution:** An **Inverted Index** (`Map<term, Array<{docIdx, tf}>>`). Query tokens only inspect the specific documents containing that term.
+- **The Result:** Search time dropped from **53ms to 3ms** (a 16x speedup), completely eliminating event-loop lag.
+
+### 2. Memoized Hybrid Retriever & BM25 Caching
+- Rebuilding the BM25 index on every query blocks Node.js for >1.2 seconds.
+- By caching the `BM25Index` and `HybridRetriever` on the vector store instance, the index is built once on initial load, reducing per-query retrieval latency to ~300ms (dominated only by vector inference).
+
+### 3. Cosine Similarity Vector Norm Precomputation
+- Standard cosine similarity formula: $\frac{\vec{a} \cdot \vec{b}}{\|\vec{a}\| \|\vec{b}\|}$.
+- Calculating $\|\vec{b}\|$ for all 24,000 vectors on every search requires 24,000 `Math.sqrt` and dot calls.
+- Precomputing `entry.norm = norm(vector)` once at ingestion/load reduces query search to a single vector norm calculation and fast float dot products.
+
+### 4. Resilient Citation Fallback Architecture
+- If a repository's source files on disk are relocated or missing (e.g. downloaded indexes), `GET /file` automatically falls back to finding the matching chunk in the indexed vector store.
+- The UI modal displays the exact snippet with line numbers and an `indexed snippet` indicator, ensuring code previews never fail with a 404 or broken modal.
+

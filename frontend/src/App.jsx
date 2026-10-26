@@ -68,23 +68,46 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleCitationClick = (rawString) => {
-    // rawString example: "[backend/src/routes/authRoutes.js:L1-L11]" or "backend/src/routes/authRoutes.js:L1-L11"
-    const cleaned = rawString.replace(/^\[|\]$/g, "");
-    const [filePart, linePart] = cleaned.split(":");
+  const handleCitationClick = (param) => {
+    if (!param) return;
+
+    // 1. Direct object passed from sources chips: { file, startLine, endLine }
+    if (typeof param === "object" && param.file) {
+      let filePart = param.file.replace(/\\/g, "/");
+      const reposMatch = filePart.match(/(?:^|\/)repos\/[^/]+\/(.*)$/i);
+      if (reposMatch) filePart = reposMatch[1];
+
+      setActiveCitation({
+        file: filePart,
+        startLine: param.startLine || null,
+        endLine: param.endLine || null,
+      });
+      return;
+    }
+
+    // 2. Raw string citation from markdown: e.g. "[backend/src/routes/authRoutes.js:L1-L11]"
+    let cleaned = String(param).replace(/^\[|\]$/g, "").trim();
+    let filePart = cleaned;
     let startLine = null;
     let endLine = null;
 
-    if (linePart) {
-      const match = linePart.match(/L?(\d+)(?:-L?(\d+))?/i);
-      if (match) {
-        startLine = parseInt(match[1], 10);
-        endLine = match[2] ? parseInt(match[2], 10) : startLine;
-      }
+    // Match line range from the end of the string (e.g. :L1-L11, :1-11, :L5)
+    // Never split by ':' because Windows paths start with drive letter 'C:'!
+    const lineMatch = cleaned.match(/:L?(\d+)(?:-L?(\d+))?\s*$/i);
+    if (lineMatch) {
+      startLine = parseInt(lineMatch[1], 10);
+      endLine = lineMatch[2] ? parseInt(lineMatch[2], 10) : startLine;
+      filePart = cleaned.slice(0, lineMatch.index).trim();
+    }
+
+    filePart = filePart.replace(/\\/g, "/");
+    const reposMatch = filePart.match(/(?:^|\/)repos\/[^/]+\/(.*)$/i);
+    if (reposMatch) {
+      filePart = reposMatch[1];
     }
 
     setActiveCitation({
-      file: filePart.trim(),
+      file: filePart,
       startLine,
       endLine,
     });
@@ -177,8 +200,8 @@ export default function App() {
 
   // Custom text renderer to transform inline citations into interactive badges
   const renderFormattedContent = (content) => {
-    // Match [path/to/file.ext:L1-L2] pattern
-    const citationRegex = /(\[[a-zA-Z0-9_\-\/\\.]+\.[a-zA-Z0-9]+(?::L?\d+(?:-L?\d+)?)?\])/g;
+    // Match [path/to/file.ext:L1-L2] pattern (supports forward/backward slashes and optional drive letters)
+    const citationRegex = /(\[[^\]\r\n]+\.[a-zA-Z0-9]+(?::L?\d+(?:-L?\d+)?)?\])/g;
 
     return (
       <ReactMarkdown
@@ -413,7 +436,7 @@ export default function App() {
                     {msg.sources.map((src, i) => (
                       <button
                         key={i}
-                        onClick={() => handleCitationClick(`${src.file}:L${src.startLine || 1}-L${src.endLine || 1}`)}
+                        onClick={() => handleCitationClick(src)}
                         style={{
                           display: "inline-flex",
                           alignItems: "center",

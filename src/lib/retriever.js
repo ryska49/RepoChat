@@ -48,6 +48,18 @@ Formatting Rules:
 4. Project Overviews: When asked what the repository does, its purpose, or an architectural overview, synthesize the project's core domain and functionality from the dependencies (in package.json/docker-compose), registered API routes, models, and entrypoints provided in the context.
 5. Missing Context: If a specific detailed question cannot be determined from the provided chunks, say: "I don't have enough context in the retrieved chunks to answer that question."`;
 
+function cleanSource(source) {
+  if (!source) return "unknown";
+  let p = source.replace(/\\/g, "/");
+  const match = p.match(/(?:^|\/)repos\/[^/]+\/(.*)$/i);
+  if (match) return match[1];
+  if (/^[a-zA-Z]:\//.test(p)) {
+    const parts = p.split("/");
+    return parts.slice(Math.max(parts.length - 3, 0)).join("/");
+  }
+  return p;
+}
+
 /**
  * Formats retrieved docs into a numbered context block for the prompt.
  */
@@ -55,8 +67,9 @@ function buildContext(docs) {
   return docs
     .map((doc, i) => {
       const { source, startLine, endLine } = doc.metadata;
+      const cleanPath = cleanSource(source);
       const lineRange = startLine && endLine ? `L${startLine}-L${endLine}` : "lines unknown";
-      return `--- Chunk ${i + 1} [${source}:${lineRange}] ---\n${doc.pageContent}`;
+      return `--- Chunk ${i + 1} [${cleanPath}:${lineRange}] ---\n${doc.pageContent}`;
     })
     .join("\n\n");
 }

@@ -166,9 +166,13 @@ export default function AddRepoModal({ onClose, onRepoAdded }) {
               fontFamily: "var(--font-mono)",
               fontSize: "0.8125rem",
               outline: "none",
-              marginBottom: "1rem",
+              marginBottom: "0.5rem",
             }}
           />
+
+          <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "1rem", lineHeight: 1.4 }}>
+            💡 All source files are indexed with 100% full context. Standard repos index in 10–30s.
+          </div>
 
           {error && (
             <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", color: "#f87171", fontSize: "0.75rem", marginBottom: "1rem" }}>

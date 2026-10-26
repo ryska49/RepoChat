@@ -3,6 +3,7 @@ import { X, FileCode2, Copy, Check, Hash } from "lucide-react";
 
 export default function CodeModal({ citation, repoPath, onClose }) {
   const [fileContent, setFileContent] = useState(null);
+  const [fromIndex, setFromIndex] = useState(false);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const highlightedRef = useRef(null);
@@ -18,11 +19,13 @@ export default function CodeModal({ citation, repoPath, onClose }) {
       })
       .then((data) => {
         setFileContent(data.content);
+        setFromIndex(!!data.fromIndex);
         setLoading(false);
       })
       .catch((err) => {
         console.error("Error fetching file:", err);
-        setFileContent("// Unable to load file content from server.");
+        setFileContent(`// Unable to load file "${citation.file}" from server for repository "${repoPath}".`);
+        setFromIndex(false);
         setLoading(false);
       });
   }, [citation, repoPath]);
@@ -115,6 +118,21 @@ export default function CodeModal({ citation, repoPath, onClose }) {
                 Lines {startLine}–{endLine || startLine}
               </span>
             )}
+            {fromIndex && (
+              <span
+                style={{
+                  backgroundColor: "rgba(16, 185, 129, 0.1)",
+                  color: "var(--accent-emerald)",
+                  border: "1px solid rgba(16, 185, 129, 0.2)",
+                  padding: "0.1rem 0.45rem",
+                  borderRadius: "4px",
+                  fontSize: "0.6875rem",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                indexed snippet
+              </span>
+            )}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -177,13 +195,13 @@ export default function CodeModal({ citation, repoPath, onClose }) {
             </div>
           ) : (
             lines.map((lineText, idx) => {
-              const lineNum = idx + 1;
-              const isHighlighted = startLine && endLine && lineNum >= startLine && lineNum <= endLine;
-              const isFirstHighlighted = lineNum === startLine;
+              const lineNum = fromIndex ? ((startLine || 1) + idx) : (idx + 1);
+              const isHighlighted = fromIndex || (startLine && endLine && lineNum >= startLine && lineNum <= endLine);
+              const isFirstHighlighted = fromIndex ? idx === 0 : lineNum === startLine;
 
               return (
                 <div
-                  key={lineNum}
+                  key={idx}
                   ref={isFirstHighlighted ? highlightedRef : null}
                   style={{
                     display: "flex",
